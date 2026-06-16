@@ -275,29 +275,45 @@
     showState('Chargement…', true);
 
     try {
-      // Filtrage côté serveur Baserow : respect_du_tri = NOK ET Temporalités = J-1
-      const url = `${API_BASE}/database/rows/table/${TABLE_ID}/`
-        + `?user_field_names=true`
-        + `&size=200`
-        + `&filter__${encodeURIComponent(FIELD_TRI)}__equal=${encodeURIComponent(VALEUR_TRI)}`
-        + `&filter__${encodeURIComponent(FIELD_TEMPORALITE)}__equal=${encodeURIComponent(VALEUR_TEMP)}`;
+      // Pas de filtre serveur ici : "respect_du_tri" est une liste déroulante (l'API attend
+      // l'ID de l'option, pas le texte) et "Temporalités" est une formule (type de retour variable).
+      // On récupère donc toutes les lignes et on filtre nous-mêmes en JavaScript.
+      let allRows = [];
+      let url = `${API_BASE}/database/rows/table/${TABLE_ID}/?user_field_names=true&size=200`;
 
-      const res = await fetch(url, { headers: { Authorization: `Token ${TOKEN}` } });
+      while (url) {
+        const res = await fetch(url, { headers: { Authorization: `Token ${TOKEN}` } });
 
-      if (!res.ok) {
-        showState(`Erreur ${res.status} lors de la récupération des données.`);
-        return;
+        if (!res.ok) {
+          showState(`Erreur ${res.status} lors de la récupération des données.`);
+          return;
+        }
+
+        const data = await res.json();
+        allRows = allRows.concat(data.results || []);
+        url = data.next; // pagination : Baserow renvoie l'URL de la page suivante, ou null
       }
 
-      const data = await res.json();
-      let rows = data.results || [];
+      // Debug : ouvre la console (F12) pour voir le format exact des champs si besoin
+      if (allRows.length) {
+        console.log('Exemple de ligne brute :', allRows[0]);
+        console.log('Valeur du champ tri :', allRows[0][FIELD_TRI]);
+        console.log('Valeur du champ temporalité :', allRows[0][FIELD_TEMPORALITE]);
+      }
 
-      // Filet de sécurité côté client, au cas où le filtrage serveur ne matcherait pas
-      // parfaitement (espace dans le nom de champ, valeur single-select vs texte, etc.)
-      rows = rows.filter(r =>
-        String(r[FIELD_TRI] ?? '').trim().toUpperCase() === VALEUR_TRI &&
-        String(r[FIELD_TEMPORALITE] ?? '').trim() === VALEUR_TEMP
-      );
+      // Filtrage : respect_du_tri = NOK ET Temporalités = J-1
+      // Avec user_field_names=true, un champ "liste déroulante" (single select) renvoie un
+      // objet { id, value, color } -> il faut comparer sur .value, pas sur l'objet entier.
+      // Un champ formule renvoie directement le texte calculé.
+      const rows = allRows.filter(r => {
+        const tri = r[FIELD_TRI];
+        const triValeur = (tri && typeof tri === 'object') ? tri.value : tri;
+        const temp = r[FIELD_TEMPORALITE];
+        const tempValeur = (temp && typeof temp === 'object') ? temp.value : temp;
+
+        return String(triValeur ?? '').trim().toUpperCase() === VALEUR_TRI
+            && String(tempValeur ?? '').trim() === VALEUR_TEMP;
+      });
 
       hideState();
 
