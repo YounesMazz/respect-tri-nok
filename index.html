@@ -291,7 +291,10 @@
 
         const data = await res.json();
         allRows = allRows.concat(data.results || []);
-        url = data.next; // pagination : Baserow renvoie l'URL de la page suivante, ou null
+        // Baserow renvoie parfois l'URL "next" en http:// au lieu de https://,
+        // ce qui est bloqué par le navigateur (Mixed Content) car la page est en https.
+        // On force donc le protocole sécurisé avant de continuer la pagination.
+        url = data.next ? data.next.replace(/^http:\/\//, 'https://') : null;
       }
 
       // Debug : ouvre la console (F12) pour voir le format exact des champs si besoin
