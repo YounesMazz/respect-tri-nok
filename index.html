@@ -73,6 +73,29 @@
     transform: scale(1.05);
   }
 
+  .card-photos .thumb.file-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: #fff;
+    border: 1px solid #e0e4ea;
+  }
+
+  .card-photos .thumb.file-icon .icon {
+    font-size: 26px;
+  }
+
+  .card-photos .thumb.file-icon .name {
+    font-size: 9px;
+    color: #777;
+    text-align: center;
+    padding: 0 4px;
+    word-break: break-all;
+    line-height: 1.2;
+  }
+
   .card-photos.no-photo {
     display: flex;
     align-items: center;
@@ -81,6 +104,19 @@
     font-size: 12px;
     min-height: 160px;
     grid-template-columns: none;
+  }
+
+  .point-passage {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    background: #e8f0fe;
+    color: #1a56db;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
   }
 
   .card-body {
@@ -169,6 +205,16 @@
     box-shadow: 0 8px 40px rgba(0,0,0,.5);
   }
 
+  #lb-pdf {
+    width: 90vw;
+    height: 80vh;
+    max-width: 1000px;
+    border: none;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+  }
+
   #lb-name {
     color: #ccc;
     font-size: 13px;
@@ -226,6 +272,10 @@
 <div id="lightbox">
   <button id="lb-close" onclick="closeLightbox()">✕</button>
   <img id="lb-img" src="" alt="">
+  <iframe id="lb-pdf" src="" style="display:none"></iframe>
+  <a id="lb-pdf-fallback" href="#" target="_blank" style="display:none; color:#9cf; font-size:12px;">
+    Le PDF ne s'affiche pas ? Ouvrir dans un nouvel onglet
+  </a>
   <div id="lb-name"></div>
   <div id="lb-nav">
     <button id="lb-prev" onclick="navLightbox(-1)">‹</button>
@@ -239,10 +289,11 @@
 
   const TABLE_ID = '465735'; // Tour de terrain
 
-  const FIELD_TRI         = 'respect_du_tri';
-  const FIELD_PHOTO       = 'respect_du_tri_photo';
-  const FIELD_COMMENTAIRE = 'respect_du_tri_commentaire';
-  const FIELD_TEMPORALITE = 'Temporalités';
+  const FIELD_TRI            = 'respect_du_tri';
+  const FIELD_PHOTO          = 'respect_du_tri_photo';
+  const FIELD_COMMENTAIRE    = 'respect_du_tri_commentaire';
+  const FIELD_TEMPORALITE    = 'Temporalités';
+  const FIELD_POINT_PASSAGE  = 'point_de_passage'; // champ "Lien vers une table"
 
   const VALEUR_TRI  = 'NOK';
   const VALEUR_TEMP = 'J-1';
@@ -270,8 +321,34 @@
     return mime && mime.startsWith('image/');
   }
 
+  function isPdf(mime) {
+    return mime === 'application/pdf';
+  }
+
+  // Un fichier "visualisable" peut s'afficher directement dans le lightbox (image ou PDF)
+  function isViewable(mime) {
+    return isImage(mime) || isPdf(mime);
+  }
+
+  function fileIcon(mime) {
+    if (!mime) return '📎';
+    if (mime.includes('word') || mime.includes('document')) return '📝';
+    if (mime.includes('sheet') || mime.includes('excel')) return '📊';
+    if (mime.includes('video')) return '🎬';
+    if (mime.includes('zip') || mime.includes('rar')) return '🗜️';
+    return '📎';
+  }
+
   function cleanName(f) {
     return f.visible_name || f.name || 'fichier';
+  }
+
+  // Le champ "Lien vers une table" renvoie un tableau [{id, value}, ...].
+  // On affiche tous les points liés, séparés par une virgule s'il y en a plusieurs.
+  function formatPointPassage(row) {
+    const liens = row[FIELD_POINT_PASSAGE] || [];
+    if (!liens.length) return null;
+    return liens.map(l => l.value).join(', ');
   }
 
   async function loadRows() {
@@ -341,14 +418,15 @@
     let totalPhotos = 0;
 
     rows.forEach(row => {
-      const fichiers = (row[FIELD_PHOTO] || []).filter(f => isImage(f.mime_type));
+      const fichiers = (row[FIELD_PHOTO] || []).filter(f => isViewable(f.mime_type)); // images ET pdf
       const commentaire = (row[FIELD_COMMENTAIRE] || '').toString().trim();
+      const pointPassage = formatPointPassage(row);
       totalPhotos += fichiers.length;
 
       const card = document.createElement('div');
       card.className = 'card';
 
-      // Zone photos : une vignette distincte par photo, cliquable individuellement
+      // Zone photos : une vignette distincte par photo OU pdf, cliquable individuellement
       const photosDiv = document.createElement('div');
       if (fichiers.length) {
         photosDiv.className = 'card-photos';
@@ -358,10 +436,20 @@
           images.push(f);
 
           const thumb = document.createElement('div');
-          thumb.className = 'thumb';
           thumb.onclick = () => openLightbox(globalIdx);
-          const thumbUrl = f.thumbnails?.card_cover?.url || f.thumbnails?.large?.url || f.url;
-          thumb.innerHTML = `<img src="${thumbUrl}" alt="${cleanName(f)}" loading="lazy">`;
+
+          if (isPdf(f.mime_type)) {
+            thumb.className = 'thumb file-icon';
+            thumb.innerHTML = `
+              <div class="icon">📄</div>
+              <div class="name">${cleanName(f)}</div>
+            `;
+          } else {
+            thumb.className = 'thumb';
+            const thumbUrl = f.thumbnails?.card_cover?.url || f.thumbnails?.large?.url || f.url;
+            thumb.innerHTML = `<img src="${thumbUrl}" alt="${cleanName(f)}" loading="lazy">`;
+          }
+
           photosDiv.appendChild(thumb);
         });
       } else {
@@ -369,11 +457,12 @@
         photosDiv.textContent = 'Aucune photo';
       }
 
-      // Zone texte (tag + commentaire)
+      // Zone texte (tag + point de passage + commentaire)
       const bodyDiv = document.createElement('div');
       bodyDiv.className = 'card-body';
       bodyDiv.innerHTML = `
         <span class="card-tag">⚠️ NOK · J-1</span>
+        ${pointPassage ? `<span class="point-passage">📍 ${pointPassage}</span>` : ''}
         <div class="card-comment-label">Commentaire</div>
         <div class="card-comment ${commentaire ? '' : 'empty'}">${commentaire || 'Aucun commentaire'}</div>
       `;
@@ -395,6 +484,8 @@
 
   function closeLightbox() {
     document.getElementById('lightbox').classList.remove('open');
+    document.getElementById('lb-pdf').src = ''; // évite de garder le PDF chargé inutilement en mémoire
+    document.getElementById('lb-pdf-fallback').style.display = 'none';
   }
 
   function navLightbox(dir) {
@@ -404,7 +495,29 @@
 
   function updateLightbox() {
     const f = images[lbIndex];
-    document.getElementById('lb-img').src  = f.url;
+    const imgEl = document.getElementById('lb-img');
+    const pdfEl = document.getElementById('lb-pdf');
+
+    if (isPdf(f.mime_type)) {
+      imgEl.style.display = 'none';
+      imgEl.src = '';
+      pdfEl.style.display = 'block';
+      // On passe par le viewer Google Docs : il charge lui-même le PDF puis l'affiche,
+      // ce qui évite les blocages "iframe dans iframe" (Pingview -> Baserow -> notre page -> PDF)
+      // qui surviennent quand le PDF est affiché directement dans une iframe imbriquée.
+      pdfEl.src = `https://docs.google.com/viewer?url=${encodeURIComponent(f.url)}&embedded=true`;
+
+      const fallback = document.getElementById('lb-pdf-fallback');
+      fallback.href = f.url;
+      fallback.style.display = 'inline-block';
+    } else {
+      document.getElementById('lb-pdf-fallback').style.display = 'none';
+      pdfEl.style.display = 'none';
+      pdfEl.src = '';
+      imgEl.style.display = 'block';
+      imgEl.src = f.url;
+    }
+
     document.getElementById('lb-name').textContent = cleanName(f);
     document.getElementById('lb-prev').disabled = lbIndex === 0;
     document.getElementById('lb-next').disabled = lbIndex === images.length - 1;
